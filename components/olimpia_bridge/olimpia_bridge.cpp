@@ -475,6 +475,20 @@ void OlimpiaBridgeClimate::write_control_registers() {
   if (this->handler_ == nullptr)
     return;
 
+  // --- Register 101: Status Register ---
+  uint16_t status_value = this->get_status_register();
+  this->handler_->write_register(this->address_, 101, status_value);
+  ESP_LOGD(TAG, "[%s] Wrote status register (101): 0x%04X", this->name_.c_str(), status_value);
+
+  delay(20);  // Delay before writing temperature
+
+  // --- Register 102: Target Temperature (°C × 10) ---
+  uint16_t target_temp = static_cast<uint16_t>(this->target_temperature * 10);
+  this->handler_->write_register(this->address_, 102, target_temp);
+  ESP_LOGD(TAG, "[%s] Wrote target temperature (102): %.1f°C", this->name_.c_str(), this->target_temperature);
+
+  delay(20);  // Delay before writing status
+
   // --- Register 103: Ambient Temperature from HA (or fallback) ---
   if (!std::isnan(this->external_ambient_temperature_)) {
     uint16_t ambient_temp = static_cast<uint16_t>(this->external_ambient_temperature_ * 10);
@@ -497,20 +511,6 @@ void OlimpiaBridgeClimate::write_control_registers() {
   } else {
     ESP_LOGW(TAG, "[%s] Ambient temperature unavailable, skipping register 103", this->name_.c_str());
   }
-
-  delay(20);  // Delay before writing status
-
-  // --- Register 101: Status Register ---
-  uint16_t status_value = this->get_status_register();
-  this->handler_->write_register(this->address_, 101, status_value);
-  ESP_LOGD(TAG, "[%s] Wrote status register (101): 0x%04X", this->name_.c_str(), status_value);
-
-  delay(20);  // Delay before writing temperature
-
-  // --- Register 102: Target Temperature (°C × 10) ---
-  uint16_t target_temp = static_cast<uint16_t>(this->target_temperature * 10);
-  this->handler_->write_register(this->address_, 102, target_temp);
-  ESP_LOGD(TAG, "[%s] Wrote target temperature (102): %.1f°C", this->name_.c_str(), this->target_temperature);
 }
 
 // Read water temperature from register 1 and publish it
