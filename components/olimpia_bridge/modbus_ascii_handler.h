@@ -13,6 +13,7 @@ class OlimpiaBridge;  // Forward declaration
 
 class ModbusAsciiHandler {
  public:
+  void set_direction(bool transmit);
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
 
   // Set single directional pin instead of using 2
