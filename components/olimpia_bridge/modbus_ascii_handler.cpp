@@ -8,6 +8,22 @@ namespace olimpia_bridge {
 
 static const char *const TAG = "modbus_ascii_handler";
 
+// -------------------- RE/DE Direction Handling --------------------
+
+void ModbusAsciiHandler::set_direction(bool transmit) {
+  if (this->direction_pin_ != nullptr) {
+    // Single direction pin controls both TX and RX
+    this->direction_pin_->digital_write(transmit);
+  } else {
+    // Dual-pin mode: DE for TX control, RE always LOW to enable receiver
+    if (this->de_pin_ != nullptr)
+      this->de_pin_->digital_write(transmit);   // HIGH = TX enable
+
+    if (this->re_pin_ != nullptr)
+      this->re_pin_->digital_write(false);      // Always LOW = RX enabled
+  }
+}
+
 // -------------------- LRC Checksum --------------------
 
 uint8_t ModbusAsciiHandler::lrc(const std::vector<uint8_t> &data) {
@@ -128,14 +144,7 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   }
 
   // --- Enable TX ---
-  if (this->direction_pin_ != nullptr) {
-    this->direction_pin_->digital_write(true);
-  } else {
-    if (this->de_pin_ != nullptr)
-      this->de_pin_->digital_write(true);   // DE HIGH → TX enable
-    if (this->re_pin_ != nullptr)
-      this->re_pin_->digital_write(false);  // RE LOW → RX disable
-  }
+  this->set_direction(true);  // Enable TX
 
   delayMicroseconds(200);  // TX enable delay
 
@@ -146,14 +155,7 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   delayMicroseconds(2000);  // Ensure turnaround delay (silent time before listening)
 
   // --- Enable RX ---
-  if (this->direction_pin_ != nullptr) {
-    this->direction_pin_->digital_write(false);
-  } else {
-    if (this->de_pin_ != nullptr)
-      this->de_pin_->digital_write(false);  // DE LOW → TX disable
-    if (this->re_pin_ != nullptr)
-      this->re_pin_->digital_write(true);   // RE HIGH → RX enable
-  }
+  this->set_direction(false);  // Enable RX
 
   uint32_t start_time = millis();
   std::string buffer;
