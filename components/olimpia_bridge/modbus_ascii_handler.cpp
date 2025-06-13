@@ -8,8 +8,6 @@ namespace olimpia_bridge {
 
 static const char *const TAG = "modbus_ascii_handler";
 
-constexpr size_t MAX_FRAME_SIZE = 256;  // Prevents runaway reads
-
 // -------------------- RE/DE Direction Handling --------------------
 
 void ModbusAsciiHandler::set_direction(bool transmit) {
@@ -126,9 +124,11 @@ bool ModbusAsciiHandler::decode_ascii_frame(const std::string &frame, std::vecto
 // -------------------- Full Modbus Transaction --------------------
 
 bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, std::vector<uint8_t> &response) {
+  constexpr size_t MAX_FRAME_SIZE = 256;
+
   ESP_LOGW(TAG, "send_and_receive() entered");
 
-  // Log request content and size
+  // Log request content and size								 
   ESP_LOGW(TAG, "request size: %d bytes", request.size());
   for (size_t i = 0; i < request.size(); i++) {
     ESP_LOGW(TAG, "  - Byte[%zu] = 0x%02X", i, request[i]);
@@ -137,7 +137,7 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   if (!this->uart_)
     return false;
 
-  // Clear leftover bytes from RX buffer
+  // Clear leftover bytes from RX buffer										
   int flushed = 0;
   while (this->uart_->available()) {
     uint8_t dummy;
@@ -159,55 +159,60 @@ bool ModbusAsciiHandler::send_and_receive(const std::vector<uint8_t> &request, s
   }
 
   // --- Enable TX ---
-  this->set_direction(true);  // Enable TX
+  this->set_direction(true);  // TX mode
+  delayMicroseconds(200);
 
-  delayMicroseconds(200);  // TX enable delay
+											 
 
   this->uart_->write_str(frame.c_str());
   ESP_LOGW(TAG, "Writing to UART: %s", frame.c_str());
   this->uart_->flush();
 
-  delayMicroseconds(2000);  // Ensure turnaround delay (silent time before listening)
+  delayMicroseconds(2000);  // turnaround time
 
   // --- Enable RX ---
-  this->set_direction(false);  // Enable RX
+  this->set_direction(false);  // RX mode
 
-  uint32_t start_time = millis();
   std::string buffer;
+  uint32_t start_time = millis();
 
-  // Increase read window to 500ms to match device latency
-  while (this->uart_->read_byte(&byte)) {
-    char c = static_cast<char>(byte);
-    buffer += c;
+  while (millis() - start_time < 500) {
+    uint8_t byte;
 
-    // Prevent runaway memory usage
-    if (buffer.length() > MAX_FRAME_SIZE) {
-      ESP_LOGW(TAG, "Received frame too long (%d bytes). Aborting read.", buffer.length());
-      break;
+  // Increase read window to 500ms to match device latency														  
+    while (this->uart_->read_byte(&byte)) {
+      char c = static_cast<char>(byte);
+      buffer += c;
+
+    // Prevent runaway memory usage								   
+      if (buffer.length() > MAX_FRAME_SIZE) {
+        ESP_LOGW(TAG, "Received frame too long (%d bytes). Aborting read.", buffer.length());
+        break;
+      }
+
+    // Debug each character received									
+      ESP_LOGD(TAG, "UART char: 0x%02X '%c'", byte, isprint(c) ? c : '.');
+
+      if (c == '\n' && buffer.length() >= 2 && buffer[buffer.length() - 2] == '\r') {
+        ESP_LOGD(TAG, "Frame terminator detected");
+        goto decode;
+      }
     }
-
-    // Debug each character received
-    ESP_LOGD(TAG, "UART char: 0x%02X '%c'", byte, isprint(c) ? c : '.');
-
-    if (c == '\n' && buffer.length() >= 2 && buffer[buffer.length() - 2] == '\r') {
-      ESP_LOGD(TAG, "Frame terminator detected");
-      goto FRAME_DONE;
-    }
-  }
+   
 
     delay(1);  // Avoid tight loop
   }
 
-FRAME_DONE:
+decode:
   ESP_LOGD(TAG, "RX raw frame: '%s'", buffer.c_str());
 
-  // Attempt to decode Modbus ASCII response
+  // Attempt to decode Modbus ASCII response											
   bool ok = decode_ascii_frame(buffer, response);
   if (!ok) {
     ESP_LOGW(TAG, "Failed to decode response: '%s'", buffer.c_str());
   }
 
-  // Track success/failure using OlimpiaBridge
+  // Track success/failure using OlimpiaBridge											  
   if (this->bridge_ != nullptr) {
     this->bridge_->increment_modbus_request(ok);
   }
