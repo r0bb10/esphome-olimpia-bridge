@@ -146,6 +146,10 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   // --- Ambient temperature (external sensor via HA) ---
   void set_external_ambient_temperature(float temp);
 
+  // --- Hysteresis (internal sensor) ---
+  void set_season_mode(const std::string &mode);
+  std::string get_season_mode() const;
+
  protected:
   uint8_t address_{1};
   std::string name_;  // Store and use the entity name
@@ -171,6 +175,10 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   uint16_t get_status_register();
   void write_control_registers();
   void read_water_temperature();
+
+  // --- Hysteresis mode handling ---
+  bool season_mode_register_initialized_{false};
+  uint16_t season_mode_register_{0xFFFF};  
 
   uint32_t slave_total_requests_{0};
   uint32_t slave_failed_requests_{0};

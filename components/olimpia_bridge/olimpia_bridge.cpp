@@ -394,7 +394,20 @@ void OlimpiaBridgeClimate::control_cycle() {
   uint32_t now = millis();
   if (!this->initialized_ || now - this->last_update_time_ > 60000) {
     this->write_control_registers();
-    this->read_water_temperature();  // purely informative, never affects current_temperature
+    this->read_water_temperature();
+
+    // --- PATCH 5: Read register 205 (hysteresis config) only once
+    if (!this->season_mode_register_initialized_) {
+      uint16_t reg205 = 0;
+      if (this->handler_->read_register(this->address_, 205, &reg205)) {
+        this->season_mode_register_ = reg205;
+        this->season_mode_register_initialized_ = true;
+        ESP_LOGI(TAG, "[%s] Register 205 (Season mode) read once after boot: %d", this->get_name().c_str(), reg205);
+      } else {
+        ESP_LOGW(TAG, "[%s] Failed to read Register 205 on first attempt", this->get_name().c_str());
+      }
+    }
+
     this->last_update_time_ = now;
     this->initialized_ = true;
 
@@ -616,6 +629,26 @@ void OlimpiaBridge::on_write_register(int address, int reg, int value) {
     ESP_LOGD(TAG, "Register write complete");
   } else {
     ESP_LOGW(TAG, "Modbus handler not initialized; write_register skipped");
+  }
+}
+
+std::string OlimpiaBridgeClimate::get_season_mode() const {
+  if (season_mode_register_ == 4) return "Winter";
+  if (season_mode_register_ == 6) return "Summer";
+  return "Winter";  // fallback
+}
+
+void OlimpiaBridgeClimate::set_season_mode(const std::string &mode) {
+  uint16_t desired = (mode == "Winter") ? 4 : 6;
+  if (this->season_mode_register_ != desired) {
+    if (this->handler_->write_register(this->address_, 205, desired)) {
+      ESP_LOGI(TAG, "[%s] Season mode changed to %s (writing %d)", this->get_name().c_str(), mode.c_str(), desired);
+      this->season_mode_register_ = desired;  // update immediately on success
+    } else {
+      ESP_LOGW(TAG, "[%s] Failed to write register 205", this->get_name().c_str());
+    }
+  } else {
+    ESP_LOGD(TAG, "[%s] Season mode already set to %s — no write needed", this->get_name().c_str(), mode.c_str());
   }
 }
 
