@@ -40,6 +40,8 @@ class ModbusAsciiHandler : public esphome::Component {
   void set_direction(bool transmit);  // Set TX/RX line direction (true = TX, false = RX)
   void add_request(ModbusRequest request);  // FSM: Request Queue
 
+  void write_byte(uint8_t byte);
+
   bool send_and_receive(const std::vector<uint8_t> &request, std::vector<uint8_t> &response);  // Low-level send and receive (used by read/write ops)
 
   void loop() override;

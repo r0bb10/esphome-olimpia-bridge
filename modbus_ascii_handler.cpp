@@ -201,6 +201,11 @@ bool ModbusAsciiHandler::write_register(uint8_t address, uint16_t reg, uint16_t 
   return true;
 }
 
+void ModbusAsciiHandler::write_byte(uint8_t byte) {
+  if (this->uart_ != nullptr)
+    this->uart_->write_byte(byte);
+}
+
 // --- FSM: Frame Builder ---
 std::vector<uint8_t> ModbusAsciiHandler::build_request_frame_ascii_(const std::vector<uint8_t> &data) {
   std::string ascii = this->encode_ascii_frame(data);
@@ -337,22 +342,22 @@ void ModbusAsciiHandler::loop() {
         request_pdu.push_back((this->current_request_.start_register >> 8) & 0xFF);
         request_pdu.push_back(this->current_request_.start_register & 0xFF);
 
-        if (this->current_request_.is_write) {
-          request_pdu.push_back((this->current_request_.length_or_value >> 8) & 0xFF);
-          request_pdu.push_back(this->current_request_.length_or_value & 0xFF);
-        } else {
-          request_pdu.push_back((this->current_request_.length_or_value >> 8) & 0xFF);
-          request_pdu.push_back(this->current_request_.length_or_value & 0xFF);
-        }
+        uint16_t val = this->current_request_.length_or_value;
+        request_pdu.push_back((val >> 8) & 0xFF);
+        request_pdu.push_back(val & 0xFF);
 
-        auto frame_ascii = this->build_request_frame_ascii_(request_pdu);
-        ESP_LOGD(TAG, "[FSM] TX (ASCII): %s", std::string(frame_ascii.begin(), frame_ascii.end()).c_str());
+        std::string frame_ascii = this->encode_ascii_frame(request_pdu);  // ← your working encoder
 
-        if (this->uart_) {
-          for (auto b : frame_ascii) {
-            this->uart_->write_byte(b);
-          }
-        }
+        ESP_LOGD(TAG, "[FSM] TX ASCII Frame: %s", frame_ascii.c_str());
+
+        this->set_direction(true);
+        delay(2);
+
+        this->uart_->write_str(frame_ascii.c_str());
+        this->uart_->flush();
+        delay(5);
+
+        this->set_direction(false);
 
         this->fsm_start_time_ = millis();
         this->fsm_state_ = ModbusState::WAIT_RESPONSE;

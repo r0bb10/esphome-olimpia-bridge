@@ -1,4 +1,5 @@
 // --- OLIMPIA BRIDGE COMPONENT IMPLEMENTATION ---
+#include "esphome.h"
 #include "olimpia_bridge.h"
 #include "esphome/core/log.h"
 
@@ -28,6 +29,11 @@ void OlimpiaBridge::setup() {
     this->handler_->set_re_pin(this->re_pin_);
     this->handler_->set_de_pin(this->de_pin_);
   }
+
+  // Register FSM handler so its loop() is called
+  App.register_component(this->handler_);
+
+  ESP_LOGI(TAG, "[Service] ModbusAsciiHandler initialized and registered");
 
   // Register API services
   this->register_service(&OlimpiaBridge::read_register,
