@@ -1,12 +1,14 @@
 // --- OLIMPIA BRIDGE COMPONENT HEADER ---
 #pragma once
 
+#include <vector>
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/api/custom_api_device.h"
 #include "modbus_ascii_handler.h"
+#include "olimpia_bridge_climate.h"
 
 namespace esphome {
 namespace olimpia_bridge {
@@ -14,7 +16,10 @@ namespace olimpia_bridge {
 // --- OlimpiaBridge component (Modbus bridge + HA services) ---
 class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
  public:
-   OlimpiaBridge() = default;
+  OlimpiaBridge() = default;
+
+  void add_climate(OlimpiaBridgeClimate *climate);
+  std::vector<OlimpiaBridgeClimate *> climates_;
 
   void setup() override;
   void update() override;
@@ -40,14 +45,11 @@ class OlimpiaBridge : public PollingComponent, public api::CustomAPIDevice {
   void read_register(int address, int reg);
   void write_register(int address, int reg, int value);
 
-  void add_climate(OlimpiaBridgeClimate *climate);
-
  protected:
   uart::UARTComponent *uart_{nullptr};
   GPIOPin *re_pin_{nullptr};
   GPIOPin *de_pin_{nullptr};
   ModbusAsciiHandler *handler_{nullptr};
-  std::vector<OlimpiaBridgeClimate *> climates_;
 };
 
 }  // namespace olimpia_bridge

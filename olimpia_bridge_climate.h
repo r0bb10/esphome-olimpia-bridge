@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cmath>  // Required for NAN
+#include "esphome/core/preferences.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
-#include "fsm/modbus_ascii_handler.h"
-#include "esphome/core/preferences.h"
+#include "modbus_ascii_handler.h"
 
 namespace esphome {
 namespace olimpia_bridge {
@@ -49,6 +50,9 @@ class OlimpiaBridgeClimate : public climate::Climate, public Component {
   void refresh_from_register_101();
   void control_cycle();
   void read_water_temperature();
+
+  ParsedState parse_command_register(uint16_t reg);
+  uint16_t build_command_register(bool on, Mode mode, FanSpeed fan_speed);
 
  protected:
   void update_state_from_parsed(const ParsedState &parsed);
