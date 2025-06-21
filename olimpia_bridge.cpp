@@ -52,18 +52,27 @@ void OlimpiaBridge::read_register(int address, int reg) {
     return;
   }
 
-  std::vector<uint16_t> response;
+  this->handler_->read_register(
+    static_cast<uint8_t>(address),
+    static_cast<uint16_t>(reg),
+    1,
+    [address, reg](bool success, std::vector<uint16_t> response) {
+      if (!success) {
+        ESP_LOGW(TAG, "[Service] Read FAILED: addr %d reg %d", address, reg);
+        return;
+      }
 
-  if (this->handler_->read_register(static_cast<uint8_t>(address), static_cast<uint16_t>(reg), 1, response)) {
-    if (!response.empty()) {
+      if (response.empty()) {
+        ESP_LOGW(TAG, "[Service] Read OK but response empty: addr %d reg %d", address, reg);
+        return;
+      }
+
       uint16_t value = response[0];
       ESP_LOGI(TAG, "[Service] Read OK: addr %d reg %d → 0x%04X (%d)", address, reg, value, value);
-    } else {
-      ESP_LOGW(TAG, "[Service] Read OK but response empty: addr %d reg %d", address, reg);
+
+      // Optional: handle value (e.g., update sensor, publish state)
     }
-  } else {
-    ESP_LOGW(TAG, "[Service] Read FAILED: addr %d reg %d", address, reg);
-  }
+  );
 }
 
 void OlimpiaBridge::write_register(int address, int reg, int value) {
@@ -74,14 +83,21 @@ void OlimpiaBridge::write_register(int address, int reg, int value) {
     return;
   }
 
-  bool success = this->handler_->write_register(static_cast<uint8_t>(address),
-                                                static_cast<uint16_t>(reg),
-                                                static_cast<uint16_t>(value));
-  if (success) {
-    ESP_LOGI(TAG, "[Service] Write OK: addr %d reg %d ← 0x%04X (%d)", address, reg, value, value);
-  } else {
-    ESP_LOGW(TAG, "[Service] Write FAILED: addr %d reg %d", address, reg);
-  }
+  this->handler_->write_register(
+    static_cast<uint8_t>(address),
+    static_cast<uint16_t>(reg),
+    static_cast<uint16_t>(value),
+    [address, reg, value](bool success, std::vector<uint16_t>) {
+      if (!success) {
+        ESP_LOGW(TAG, "[Service] Write FAILED: addr %d reg %d", address, reg);
+        return;
+      }
+
+      ESP_LOGI(TAG, "[Service] Write OK: addr %d reg %d ← 0x%04X (%d)", address, reg, value, value);
+
+      // Optional: confirm state, refresh read, etc.
+    }
+  );
 }
 
 }  // namespace olimpia_bridge

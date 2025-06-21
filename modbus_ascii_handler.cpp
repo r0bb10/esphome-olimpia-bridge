@@ -142,6 +142,33 @@ bool ModbusAsciiHandler::read_register(uint8_t address, uint16_t reg, uint8_t co
   return true;
 }
 
+// --- Public Modbus API (async) ---
+void ModbusAsciiHandler::read_register(uint8_t address, uint16_t reg, uint16_t count,
+                                       std::function<void(bool success, std::vector<uint16_t>)> callback) {
+  ModbusRequest req;
+  req.address = address;
+  req.function = 0x03;  // Read Holding Registers
+  req.start_register = reg;
+  req.length_or_value = count;
+  req.is_write = false;
+  req.callback = std::move(callback);
+
+  this->add_request(req);
+}
+
+void ModbusAsciiHandler::write_register(uint8_t address, uint16_t reg, uint16_t value,
+                                        std::function<void(bool success, std::vector<uint16_t>)> callback) {
+  ModbusRequest req;
+  req.address = address;
+  req.function = 0x06;  // Write Single Register
+  req.start_register = reg;
+  req.length_or_value = value;
+  req.is_write = true;
+  req.callback = std::move(callback);
+
+  this->add_request(req);
+}
+
 // --- Write Single Holding Register ---
 bool ModbusAsciiHandler::write_register(uint8_t address, uint16_t reg, uint16_t value) {
   std::vector<uint8_t> request = {
@@ -172,6 +199,18 @@ bool ModbusAsciiHandler::write_register(uint8_t address, uint16_t reg, uint16_t 
 
   ESP_LOGD(TAG, "[Modbus] Write success: addr=0x%02X reg=0x%04X value=0x%04X", address, reg, value);
   return true;
+}
+
+// --- FSM: Frame Builder ---
+std::vector<uint8_t> ModbusAsciiHandler::build_request_frame_ascii_(const std::vector<uint8_t> &data) {
+  std::string ascii = this->encode_ascii_frame(data);
+  return std::vector<uint8_t>(ascii.begin(), ascii.end());
+}
+
+// --- FSM: Request Queue ---
+void ModbusAsciiHandler::add_request(ModbusRequest request) {
+  this->request_queue_.push(std::move(request));
+  ESP_LOGD(TAG, "[FSM] Request enqueued (fn=0x%02X reg=0x%04X)", request.function, request.start_register);
 }
 
 // --- Full Modbus Transaction ---
@@ -275,6 +314,136 @@ decode:
   }
 
   return ok;
+}
+
+// --- FSM: Loop ---
+void ModbusAsciiHandler::loop() {
+  switch (this->fsm_state_) {
+    case ModbusState::IDLE:
+      if (!this->request_queue_.empty()) {
+        this->current_request_ = this->request_queue_.front();
+        this->request_queue_.pop();
+        ESP_LOGD(TAG, "[FSM] Transition: IDLE → SEND_REQUEST");
+        this->fsm_state_ = ModbusState::SEND_REQUEST;
+      }
+      break;
+
+    case ModbusState::SEND_REQUEST:
+      {
+        std::vector<uint8_t> request_pdu;
+
+        request_pdu.push_back(this->current_request_.address);
+        request_pdu.push_back(this->current_request_.function);
+        request_pdu.push_back((this->current_request_.start_register >> 8) & 0xFF);
+        request_pdu.push_back(this->current_request_.start_register & 0xFF);
+
+        if (this->current_request_.is_write) {
+          request_pdu.push_back((this->current_request_.length_or_value >> 8) & 0xFF);
+          request_pdu.push_back(this->current_request_.length_or_value & 0xFF);
+        } else {
+          request_pdu.push_back((this->current_request_.length_or_value >> 8) & 0xFF);
+          request_pdu.push_back(this->current_request_.length_or_value & 0xFF);
+        }
+
+        auto frame_ascii = this->build_request_frame_ascii_(request_pdu);
+        ESP_LOGD(TAG, "[FSM] TX (ASCII): %s", std::string(frame_ascii.begin(), frame_ascii.end()).c_str());
+
+        if (this->uart_) {
+          for (auto b : frame_ascii) {
+            this->uart_->write_byte(b);
+          }
+        }
+
+        this->fsm_start_time_ = millis();
+        this->fsm_state_ = ModbusState::WAIT_RESPONSE;
+      }
+      break;
+
+    case ModbusState::WAIT_RESPONSE:
+      if (this->read_available_()) {
+        ESP_LOGD(TAG, "[FSM] Response ready, processing");
+        this->fsm_state_ = ModbusState::PROCESS_RESPONSE;
+      } else if (millis() - this->fsm_start_time_ > fsm_timeout_ms_) {
+        ESP_LOGW(TAG, "[FSM] Timeout waiting for response");
+        this->fsm_state_ = ModbusState::ERROR;
+      }
+      break;
+
+    case ModbusState::PROCESS_RESPONSE:
+      {
+        std::vector<uint8_t> response;
+        std::string raw(reinterpret_cast<char *>(this->rx_buffer_.data()), this->rx_buffer_.size());
+        this->rx_buffer_.clear();
+
+        if (!this->decode_ascii_frame(raw, response)) {
+          ESP_LOGW(TAG, "[FSM] Invalid ASCII frame");
+          this->fsm_state_ = ModbusState::ERROR;
+          break;
+        }
+
+        if (response.size() < 2 || response[0] != this->current_request_.address) {
+          ESP_LOGW(TAG, "[FSM] Address mismatch in response");
+          this->fsm_state_ = ModbusState::ERROR;
+          break;
+        }
+
+        std::vector<uint16_t> result;
+
+        if (this->current_request_.function == 0x03 || this->current_request_.function == 0x04) {
+          if (response.size() < 3) {
+            ESP_LOGW(TAG, "[FSM] Response too short");
+            this->fsm_state_ = ModbusState::ERROR;
+            break;
+          }
+
+          uint8_t byte_count = response[2];
+          for (int i = 0; i < byte_count; i += 2) {
+            if (3 + i + 1 >= response.size()) break;
+            uint16_t val = (response[3 + i] << 8) | response[3 + i + 1];
+            result.push_back(val);
+          }
+        }
+
+        if (this->current_request_.callback)
+          this->current_request_.callback(true, result);
+
+        this->fsm_state_ = ModbusState::IDLE;
+      }
+      break;
+
+    case ModbusState::ERROR:
+      ESP_LOGE(TAG, "[FSM] Error during request");
+      if (this->current_request_.callback)
+        this->current_request_.callback(false, {});
+      this->fsm_state_ = ModbusState::IDLE;
+      break;
+  }
+}
+
+bool ModbusAsciiHandler::read_available_() {
+  // Check if UART has a complete frame (ends in \n)
+  if (!this->uart_ || !this->uart_->available())
+    return false;
+
+  while (this->uart_->available()) {
+    uint8_t byte;
+    if (!this->uart_->read_byte(&byte)) break;
+
+    this->rx_buffer_.push_back(byte);
+
+    if (byte == '\n') {
+      return true;  // End of ASCII frame
+    }
+
+    // Protect against runaway buffer
+    if (this->rx_buffer_.size() > 128) {
+      this->rx_buffer_.clear();
+      ESP_LOGW(TAG, "[FSM] RX overflow, buffer cleared");
+      break;
+    }
+  }
+
+  return false;
 }
 
 }  // namespace olimpia_bridge
