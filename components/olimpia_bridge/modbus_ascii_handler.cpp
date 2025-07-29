@@ -20,15 +20,29 @@ void ModbusAsciiHandler::setup() {
     return;
   }
 
-  // Initialize RE/DE direction control pins
-  if (this->re_pin_ != nullptr && this->de_pin_ != nullptr) {
+  // Check for conflicting or missing direction pin configuration
+  bool has_en = (this->en_pin_ != nullptr);
+  bool has_re = (this->re_pin_ != nullptr);
+  bool has_de = (this->de_pin_ != nullptr);
+
+  if (has_en && (has_re || has_de)) {
+    ESP_LOGE(TAG, "[Modbus] Invalid configuration: en_pin cannot be used with re_pin or de_pin");
+    this->mark_failed();
+    return;
+  }
+
+  if (has_en) {
+    this->en_pin_->setup();
+    this->en_pin_->digital_write(false); // RX mode by default
+    ESP_LOGCONFIG(TAG, "[Modbus] RS-485 single EN direction pin initialized");
+  } else if (has_re && has_de) {
     this->re_pin_->setup();
     this->de_pin_->setup();
     this->re_pin_->digital_write(false);  // RX mode
     this->de_pin_->digital_write(false);  // RX mode
-    ESP_LOGCONFIG(TAG, "[Modbus] RS-485 direction control pins initialized");
+    ESP_LOGCONFIG(TAG, "[Modbus] RS-485 RE/DE direction control pins initialized");
   } else {
-    ESP_LOGE(TAG, "[Modbus] No RE/DE pair configured for RS-485 direction control");
+    ESP_LOGE(TAG, "[Modbus] No valid direction control pin(s) configured for RS-485");
     this->mark_failed();
     return;
   }
@@ -36,10 +50,14 @@ void ModbusAsciiHandler::setup() {
 
 // --- Direction control ---
 void ModbusAsciiHandler::set_direction(bool transmit) {
-  if (this->re_pin_ != nullptr)
-    this->re_pin_->digital_write(transmit);
-  if (this->de_pin_ != nullptr)
-    this->de_pin_->digital_write(transmit);
+  if (this->en_pin_ != nullptr) {
+    this->en_pin_->digital_write(transmit);
+  } else {
+    if (this->re_pin_ != nullptr)
+      this->re_pin_->digital_write(transmit);
+    if (this->de_pin_ != nullptr)
+      this->de_pin_->digital_write(transmit);
+  }
 }
 
 // --- LRC checksum ---
