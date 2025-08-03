@@ -76,6 +76,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional("en_pin"): pins.gpio_output_pin_schema,
         cv.Optional("re_pin"): pins.gpio_output_pin_schema,
         cv.Optional("de_pin"): pins.gpio_output_pin_schema,
+        cv.Optional("activity_pin"): pins.gpio_output_pin_schema,
         cv.Required("error_ratio_sensor"): sensor.sensor_schema(
             unit_of_measurement="%",
             entity_category="diagnostic",
@@ -97,9 +98,11 @@ async def to_code(config):
     uart_var = await cg.get_variable(config[CONF_UART_ID])
     cg.add(handler.set_uart(uart_var))
 
+
     en_pin = config.get("en_pin")
     re_pin = config.get("re_pin")
     de_pin = config.get("de_pin")
+    activity_pin = config.get("activity_pin")
 
     if en_pin is not None:
         if re_pin is not None or de_pin is not None:
@@ -113,6 +116,10 @@ async def to_code(config):
         cg.add(handler.set_de_pin(de_pin_expr))
     else:
         raise cv.Invalid("You must specify either en_pin or both re_pin and de_pin.")
+
+    if activity_pin is not None:
+        activity_pin_expr = await cg.gpio_pin_expression(activity_pin)
+        cg.add(handler.set_activity_pin(activity_pin_expr))
 
     # Create bridge with pre-configured handler
     bridge = cg.new_Pvariable(config[CONF_ID])
